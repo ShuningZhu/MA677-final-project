@@ -1,0 +1,348 @@
+---
+title: "Final Project"
+author: "Shuning Zhu"
+date: "5/2/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=F,message = F)
+knitr::opts_chunk$set(echo = F)
+knitr::opts_chunk$set(fig.width=6, fig.height=3,fig.align = "center") 
+pacman::p_load(
+tidyverse,
+MASS,
+openxlsx,
+mle.tools,
+deconvolveR,
+ggplot2,
+dplyr,
+hrbrthemes,
+reshape2,
+Rmisc,
+viridis,
+RColorBrewer
+)
+
+```
+
+## Illinois_rain distribution
+
+```{r}
+library(readxl)
+library(fitdistrplus)
+setwd("~/Desktop/MA677/Final project")
+Illinois_rainn<- read_excel("Illinois_rain_1960-1964.xlsx")
+```
+
+
+```{r}
+year_1960<-Illinois_rainn$`1960`[!is.na(Illinois_rainn$`1960`)]
+year_1961<-Illinois_rainn$`1961`[!is.na(Illinois_rainn$`1961`)]
+year_1962<-Illinois_rainn$`1962`[!is.na(Illinois_rainn$`1962`)]
+year_1963<-Illinois_rainn$`1963`[!is.na(Illinois_rainn$`1963`)]
+year_1964<-Illinois_rainn$`1964`[!is.na(Illinois_rainn$`1964`)]
+```
+
+
+### Fit distribution for each year
+
+```{r}
+hist(year_1960,breaks = 20)
+```
+
+I assume that rainfall data of all the 5 years share one common distribution but with different parameter values.
+After looking into the histograme of the rainfall data of year 1960 I notice that it's obviously left-bounded which means all the records are more than 0. And it's also right-skewed distributed with a tail on the right side. So I consider to use some specific distributions like weibull, gamma, lognorm distribution to fit the data. The choose one best distribution to describe the rainfall data.
+
+
+
+```{r}
+fw <- fitdist(year_1960, "weibull")
+fg <- fitdist(year_1960, "gamma")
+fln <- fitdist(year_1960, "lnorm")
+
+plot.legend <- c("Weibull", "lognormal", "gamma")
+denscomp(list(fw, fln, fg), legendtext = plot.legend)
+qqcomp(list(fw, fln, fg), legendtext = plot.legend)
+cdfcomp(list(fw, fln, fg), legendtext = plot.legend)
+ppcomp(list(fw, fln, fg), legendtext = plot.legend)
+
+```
+
+Plots above are four Goodness-of-fit plots for various distributions fitted to continuous data (Weibull, gamma and lognormal distributions fitted to rainfall dataset) as provided by functions denscomp, qqcomp, cdfcomp and ppcomp. To start with, I look into the Histogram vs Theoretical densities. However I can not find significant difference among these three distributions. So then I look into the p-p plot to see the goodness of these three distributions fit to the center of the data set and it shows that the Weibull distribution has a relatively outstanding performance on that. Also I check the q-q plot and it shows that none of these three distributions fit the right tail of the data very well although the left tail is well fitted by all of them.
+I find it hard to tell which distribution fits the data better than others directly from the visualizations so then I am going to look into and compare some Goodness-of-fit statistics of these distributions.
+
+
+
+```{r}
+gofstat(list(fw,fg,fln),fitnames = c("Weibull", "lognormal", "gamma"))
+```
+
+It can be found from the result above that weibull distribution has an outstanding performance in terms of Kolmogorov-Smirnov statistic, Cramer-von Mises statistic and Anderson-Darling statistic. Gamma distribution has an outstanding performance in terms of AIC and BIC. Personally I choose Weibull distribution to do following steps.
+
+
+
+### Parameter estimation using MLE
+
+
+```{r}
+fw1 <- fitdist(year_1960, "weibull")
+fw2 <- fitdist(year_1961, "weibull")
+fw3 <- fitdist(year_1962, "weibull")
+fw4 <- fitdist(year_1963, "weibull")
+fw5 <- fitdist(year_1964, "weibull")
+summary(fw1)
+summary(fw2)
+summary(fw3)
+summary(fw4)
+summary(fw5)
+```
+The tables above show the estimations of parameters of 5 years' rainfall data using MLE.
+
+
+### Identify wet and dry years
+
+My next step is to identify identify wet years and dry years using this distribution, 
+
+
+```{r}
+
+storm<-c(48,48,56,37,38)
+dat2<- Illinois_rainn %>% summarise(Years = c(1960, 1961, 1962, 1963, 1964),
+          sd = apply(X=Illinois_rainn , MARGIN=2, FUN=sd, na.rm=TRUE),
+          total_Rainfall = apply(X=Illinois_rainn , MARGIN=2, FUN=sum, na.rm=TRUE),
+          mean_rainfall=apply(X=na.omit(Illinois_rainn) , MARGIN=2, FUN=mean, na.rm=TRUE),
+          Storm_num = storm)
+dat2$type<- ifelse(dat2$total_Rainfall > mean(dat2$total_Rainfall)+sd(dat2$total_Rainfall), "wet",
+                   ifelse(dat2$total_Rainfall > mean(dat2$total_Rainfall)-sd(dat2$total_Rainfall), "normal", "dry"))
+dat2
+
+sum<-apply(na.omit(Illinois_rainn),2,sum)
+#summary(lm(sum~storm))
+#summary(lm(sum~dat2$mean_rainfall))
+
+```
+
+I define the wet year as in which the total rainfall is an upper outlier of these 5 years' total rainfall. I define the dry year as in which the total rainfall is an lower outlier of these 5 years' total rainfall. The years in the middle are normal years.
+
+
+More storms nor more rainfall brought by individual storm does not separately correspond to more rainfall.For instance, 1962, the year with most storms, is a normal year. Further more, fewer storms happened in 1963 than 1964, nevertheless the later year is a dry year. But the product of them is the total rainfall which directly determines if a specific year is wet or dry or normal.
+
+### Extent
+
+The article by Floyd Huff discussed that the individual effects of mean rainfall, storm duration,and other storm factors were small and erratic in behavior when the foregoing analytical technique was used. As a result, we don't have enough confidence to claim that the storm has no relationship with rainfall due to the small data set.
+What we can extent in next step is collecting enough data to make a more solid conclusion.
+
+
+## 4.25
+
+
+```{r}
+f <- function(x, a=0, b=1) dunif(x, a, b)
+F <- function(x, a=0, b=1) punif(x, a, b, lower.tail=FALSE)
+integrand <- function(x,r,n,a=0, b=1) {
+  x * (1 - F(x, a, b))^(r-1) * F(x, a, b)^(n-r) * f(x, a, b)
+}
+## expectation
+E <- function(r,n, a=0, b=1) {
+  (1/beta(r,n-r+1)) * integrate(integrand,-Inf,Inf, r, n, a, b)$value
+}
+medianprrox<-function(i,n){
+  m<-(i-1/3)/(n+1/3)
+  return(m)
+}
+E(2.5,5)
+medianprrox(2.5,5)
+
+```
+```{r}
+E(5,10)
+medianprrox(5,10)   
+```
+
+We can respectively obtain expectations and medians, and find that expectations are approximately equal to the medians.
+
+
+
+## 4.39
+
+```{r fig.height = 3, fig.width= 5}
+data<-c(0.4,1.0,1.9,3.0,5.5,8.1,12.1,25.6,50.0,56.0,70.0,115.0,115.0,119.5,154.5,157.0,175.0,179.0,180.0,406.0)
+# fit linear model
+model <- lm(data~1)
+#find optimal lambda for Box-Cox transformation 
+bc <- boxcox(data~1)
+lambda <- bc$x[which.max(bc$y)]
+#obtain new data using the Box-Cox transformation
+transform_data <- (data ^ lambda - 1) / lambda
+```
+
+We can make comparison between the raw data and the transform data by the histogram plot.
+
+```{r warning=FALSE}
+# make comparison 
+combine_data <- data.frame(
+   type = c( rep("raw data", 20), rep("transform data", 20) ),
+   value = c(data, transform_data))
+combine_data %>%
+    ggplot(aes(x=value, fill=type)) +
+    geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity',bins=30) +
+    scale_fill_manual(values=c("#69b3a2", "#404080")) +
+    #theme_ipsum() +    
+    labs(fill="")+
+   facet_grid(~type)
+```
+
+##4.27
+
+```{r}
+# obtain the data
+Jan<-c(0.15,0.25,0.10,0.20,1.85,1.97,0.80,0.20,0.10,0.50,0.82,0.40,1.80,0.20,1.12,1.83,
+       0.45,3.17,0.89,0.31,0.59,0.10,0.10,0.90,0.10,0.25,0.10,0.90)
+Jul<-c(0.30,0.22,0.10,0.12,0.20,0.10,0.10,0.10,0.10,0.10,0.10,0.17,0.20,2.80,0.85,0.10,
+       0.10,1.23,0.45,0.30,0.20,1.20,0.10,0.15,0.10,0.20,0.10,0.20,0.35,0.62,0.20,1.22,
+       0.30,0.80,0.15,1.53,0.10,0.20,0.30,0.40,0.23,0.20,0.10,0.10,0.60,0.20,0.50,0.15,
+      0.60,0.30,0.80,1.10,
+      0.2,0.1,0.1,0.1,0.42,0.85,1.6,0.1,0.25,0.1,0.2,0.1)
+```
+
+### (a) 
+```{r}
+library(psych)
+describe(Jan)
+```
+```{r}
+describe(Jul)
+```
+Based on the summary statistics from two data sets, we can conclude that data set Jan contains higher mean, median, max and range values, whereas data set Jul contains more variables and higher skew value.
+
+### (b)
+```{r fig.height = 3, fig.width= 5}
+qqnorm(Jan, pch = 1)
+qqline(Jan, col = "steelblue", lwd = 2)
+```
+```{r fig.height = 3, fig.width= 5}
+qqnorm(Jul, pch = 1)
+qqline(Jul, col = "steelblue", lwd = 2)
+```
+
+The qqplots have light tails, as the result, we think the normal distribution is unreasonable for this problem.
+
+We generate density plots to prove the conclusion. The distributions are closer to the gamma distribution rather than normal distribution.
+
+```{r}
+par(mfrow = c(1, 2))  
+plot(density(Jan),main='Jan density')
+plot(density(Jul),main='Jul density')
+```
+
+
+### (c)
+
+
+
+```{r fig.height = 4, fig.width= 7}
+# fit a gamma model
+library(fitdistrplus)
+Jan.gamma <- fitdist(Jan, distr = "gamma", method = "mle")
+summary(Jan.gamma)
+par(mar=c(1,1,1,1))
+plot(Jan.gamma)
+# maximum likelihood estimator
+Jan.gamma$estimate[1]+c(-1,1)*1.96*Jan.gamma$sd[1]
+```
+
+```{r}
+# use numerical optimization routine to get the maximum of the log-likelihood function
+log_lik=function(theta){
+   a=theta[1]
+   b=theta[2]
+   logL=sum(log(dgamma(Jan,a,b)))
+   return(-logL)
+ }
+optim(c(1,1),log_lik)
+# profile likelihood.
+prof_log_lik=function(a){
+   b=(optim(1,function(z) -sum(log(dgamma(Jan,a,z)))))$par
+   return(-sum(log(dgamma(Jan,a,b))))
+ } 
+vx=seq(.5,3,length=101)
+vl=-Vectorize(prof_log_lik)(vx)
+plot(vx,vl,type="l",main = "Jan profile likelihood")
+optim(1,prof_log_lik)
+```
+
+```{r fig.height = 4, fig.width= 7}
+Jul.gamma <- fitdist(Jul, distr = "gamma", method = "mle")
+summary(Jul.gamma)
+par(mar=c(1,1,1,1))
+plot(Jul.gamma)
+```
+
+
+```{r fig.height = 4, fig.width= 7}
+Jul.gamma <- fitdist(Jul, distr = "gamma", method = "mle")
+summary(Jul.gamma)
+par(mar=c(1,1,1,1))
+plot(Jul.gamma)
+# maximum likelihood estimator
+Jul.gamma$estimate[1]+c(-1,1)*1.96*Jul.gamma$sd[1]
+```
+```{r}
+# use numerical optimization routine to get the maximum of the log-likelihood function
+log_lik=function(theta){
+   a=theta[1]
+   b=theta[2]
+   logL=sum(log(dgamma(Jul,a,b)))
+   return(-logL)
+ }
+optim(c(1,1),log_lik)
+# profile likelihood.
+prof_log_lik=function(a){
+   b=(optim(1,function(z) -sum(log(dgamma(Jul,a,z)))))$par
+   return(-sum(log(dgamma(Jul,a,b))))
+ } 
+vx=seq(.5,3,length=101)
+vl=-Vectorize(prof_log_lik)(vx)
+plot(vx,vl,type="l",main = "Jul profile likelihood")
+optim(1,prof_log_lik)
+```
+ 
+ Compare the parameters, Jul data set has higher maximum likelihood estimator, and it fits better.
+ 
+ 
+ 
+### (d)
+
+
+
+
+```{r fig.height = 3, fig.width= 5}
+qqGamma <- function(x, ylab = deparse(substitute(x)),
+                    xlab = "Theoretical Quantiles", 
+                    main = "Gamma Distribution QQ Plot",...)
+{
+    # Plot qq-plot for gamma distributed variable
+    xx = x[!is.na(x)]
+    aa = (mean(xx))^2 / var(xx)
+    ss = var(xx) / mean(xx)
+    test = rgamma(length(xx), shape = aa, scale = ss)
+    qqplot(test, xx, xlab = xlab, ylab = ylab, main = main,...)
+    abline(0,1, lty = 2)
+}
+qqGamma(Jan)
+```
+```{r fig.height = 3, fig.width= 5}
+qqGamma(Jul)
+```
+
+It seems that Jul data set fits better in gamma distribution.
+
+
+
+
+
+
+
+
+
